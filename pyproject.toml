@@ -11,6 +11,7 @@ dependencies = [
     "beautifulsoup4>=4.15.0",
     "numpy>=2.5.4",
     "requests>=2.34.2",
+    "transformers>=5.22.2",
 ]
 
 [project.scripts]
