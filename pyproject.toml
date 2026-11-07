@@ -1,0 +1,23 @@
+[project]
+name = "ece-generative-ai"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "BaptVic78", email = "victor.rouleau@edu.ece.fr" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "numpy>=2.5.4",
+    "requests>=2.34.2",
+]
+
+[project.scripts]
+ece-generative-ai = "ece_generative_ai:main"
+
+[build-system]
+requires = ["uv_build>=0.12.20,<0.13.0"]
+build-backend = "uv_build"
+
+[tool.uv]
+package = false
