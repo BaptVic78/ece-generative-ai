@@ -88,21 +88,21 @@ def get_chunks_tokens(urls, chunk_size=200, overlap=50):
         
     return chunks
 
-def retrieve(embeddings, chunks, question, k=2):
+def retrieve(embeddings, chunks, question, k=4):
     q = embed([question])[0]
     scores = embeddings @ q / (np.linalg.norm(embeddings, axis=1) * np.linalg.norm(q)) # cosine similarity formula
     return [chunks[i] for i in np.argsort(scores)[::-1][:k]] # returns top 3 similary chunks
 
 def answer_question(question, chunks, embeddings):
-    passages = retrieve(embeddings, chunks, question, k=2)
+    passages = retrieve(embeddings, chunks, question, k=4)
     context = "\n\n".join(
         f"[{i}] Source: {passage['url']}\n{passage['text']}"
         for i, passage in enumerate(passages, start=1)
     )
 
-    prompt = f"""Answer in the language of the question using ONLY the passages below.
-After each factual claim, cite the URL link source (https://...).
-If the passages do not contain the answer, say that you do not know.
+    prompt = f"""Answer in the language of the question using only the passages below.
+Cite the supporting passage's exact URL after each factual claim.
+If the passages do not support an answer, JUST SAY you do not know.
 
 Passages:
 {context}
@@ -124,6 +124,21 @@ if __name__ == "__main__":
     chunks = get_chunks_tokens(urls)
     embeddings = embed([chunk["text"] for chunk in chunks])
     run_llm_with_rag(chunks, embeddings)
+    # question = (
+    # "Après le découpage d’un document, quel champ permet de retrouver "
+    # "le document d’origine dans Haystack ?"
+    # )
+
+    # passages = retrieve(embeddings, chunks, question, k=10)
+
+    # for rang, passage in enumerate(passages, start=1):
+    #     if "source_id" in passage["text"]:
+    #         print(f"Passage contenant source_id trouvé au rang {rang}")
+    #         print(passage["text"])
+    #         break
+    # else:
+    #     print("Aucun passage contenant source_id dans le top 10.")
+
 
 
 
