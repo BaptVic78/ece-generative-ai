@@ -2,11 +2,18 @@ import requests
 import numpy as np
 from pathlib import Path
 from bs4 import BeautifulSoup
+from transformers import AutoTokenizer
+
+tokenizer = AutoTokenizer.from_pretrained("Qwen/Qwen3-Embedding-0.6B")
 
 OLLAMA = "http://localhost:11434"
 EMBED_MODEL = "qwen3-embedding:0.6b"
 LLM = "qwen3.5:4b"
-URL = "https://www.sbert.net/examples/sentence_transformer/applications/retrieve_rerank/README.html"
+urls = ["https://www.sbert.net/examples/sentence_transformer/applications/retrieve_rerank/README.html", 
+        "https://docs.haystack.deepset.ai/docs/documentsplitter", 
+        "https://www.sbert.net/examples/sentence_transformer/applications/semantic-search/README.html",
+        "https://qdrant.tech/documentation/search/hybrid-queries/"
+]
 
 def embed(texts):
     response = requests.post(f"{OLLAMA}/api/embed", json={"model": EMBED_MODEL, "input": texts})
@@ -19,44 +26,104 @@ def ask_llm(prompt):
         "think": False,
         "stream": False
     })
-    return response.json()["message"]["content"]
-
-def get_chunks(url):
-    chunks = []
-    response = requests.get(url, timeout=30)
     response.raise_for_status()
+    data = response.json()
+    for label, field in [
+    ("Chargement de Qwen", "load_duration"),
+    ("Lecture du prompt", "prompt_eval_duration"),
+    ("Génération de la réponse", "eval_duration"),
+    ]:
+        print(f"{label} : {data[field] / 1_000_000_000:.1f} s")
 
-    page = BeautifulSoup(response.content, "html.parser")
-    article = page.select_one("article, main, [role='main']")
-    if article is None:
-        raise ValueError("Impossible de trouver le contenu principal de la page.")
+    return data["message"]["content"]
 
-    for element in article.find_all("p") :
-        text = element.get_text(" ", strip=True)
-        if text:
-            chunks.append(text)
+def get_chunks_paragraphs(urls):
+    chunks = []
+    for url in urls : 
+        response = requests.get(url, timeout=30)
+        response.raise_for_status()
+
+        page = BeautifulSoup(response.content, "html.parser") # page contains the HTML code of the page
+        article = page.select_one("article, main, [role='main']") # article contains the 1st HTML element that correspond to 1 of the 3 selectors
+        if article is None:
+            raise ValueError("Impossible de trouver le contenu principal de la page.")
+
+        for element in article.find_all("p") :
+            text = element.get_text(" ", strip=True)
+            if text:
+                chunks.append({
+                    "text": text, 
+                    "url": url
+                })
     return chunks
 
-def retrieve(embeddings, chunks, question, k=3):
+def get_chunks_tokens(urls, chunk_size=200, overlap=50):
+    chunks = []
+    for url in urls:
+        response = requests.get(url, timeout=30)
+        response.raise_for_status()
+
+        page = BeautifulSoup(response.content, "html.parser")
+        article = page.select_one("article, main, [role='main']")
+        if article is None:
+            raise ValueError("Impossible de trouver le contenu principal de la page.")
+
+        paragraphs = []
+        for element in article.find_all(["p", "li"]):
+            text = element.get_text(" ", strip=True)
+            if text:
+                paragraphs.append(text)
+
+        text_page = "\n\n".join(paragraphs)
+        tokens = tokenizer.encode(text_page, add_special_tokens=False)
+
+        for debut in range(0, len(tokens), chunk_size - overlap):
+            fin = debut + chunk_size  # which tokens we take   
+            chunks.append({
+                "text": tokenizer.decode(tokens[debut:fin]), 
+                "url": url
+            })
+            if fin >= len(tokens):
+                break
+        
+    return chunks
+
+def retrieve(embeddings, chunks, question, k=2):
     q = embed([question])[0]
     scores = embeddings @ q / (np.linalg.norm(embeddings, axis=1) * np.linalg.norm(q)) # cosine similarity formula
     return [chunks[i] for i in np.argsort(scores)[::-1][:k]] # returns top 3 similary chunks
 
-chunks = get_chunks(URL)
-print(chunks)
-embeddings = embed(chunks)
-print(embeddings)
+def answer_question(question, chunks, embeddings):
+    passages = retrieve(embeddings, chunks, question, k=2)
+    context = "\n\n".join(
+        f"[{i}] Source: {passage['url']}\n{passage['text']}"
+        for i, passage in enumerate(passages, start=1)
+    )
 
-while True:
-    question = input("Ask: ")
-    context = "\n\n".join(retrieve(embeddings=embeddings, chunks=chunks, question=question, k=3))
-    prompt = f"""Answer the question using ONLY the context below. 
-If the answer isn't in the context, say "I don't know".
+    prompt = f"""Answer in the language of the question using ONLY the passages below.
+After each factual claim, cite the URL link source (https://...).
+If the passages do not contain the answer, say that you do not know.
 
-Context:
+Passages:
 {context}
 
-Question: {question}"""
-    print("\n" + ask_llm(prompt) + "\n")
+Question:
+{question}
+"""
+    return ask_llm(prompt), passages
+
+def run_llm_with_rag(chunks, embeddings):
+    while True:
+        question = input("Ask: ")
+        answer, passages = answer_question(question, chunks, embeddings)
+        print(answer)
+        for i, passage in enumerate(passages, start=1):
+            print(f"[{i}] {passage['url']}")
+    
+if __name__ == "__main__":
+    chunks = get_chunks_tokens(urls)
+    embeddings = embed([chunk["text"] for chunk in chunks])
+    run_llm_with_rag(chunks, embeddings)
+
 
 
