@@ -1,0 +1,107 @@
+from dotenv import load_dotenv
+import os
+import requests
+import numpy as np
+from pathlib import Path
+from bs4 import BeautifulSoup
+from transformers import AutoTokenizer
+
+from db import db_connection, save_chunks
+
+env_path = Path(__file__).resolve().parent.parent / ".env"
+load_dotenv(dotenv_path=env_path)
+
+OLLAMA = os.environ.get("OLLAMA_URL")
+EMBED_MODEL = os.environ.get("EMBED_MODEL")
+
+tokenizer = AutoTokenizer.from_pretrained(os.environ["TOKENIZER_MODEL"])
+
+urls = ["https://docs.haystack.deepset.ai/docs/documentcleaner", 
+        "https://docs.haystack.deepset.ai/docs/documentsplitter", 
+        "https://docs.haystack.deepset.ai/docs/recursivesplitter", 
+        "https://www.sbert.net/examples/sentence_transformer/applications/semantic-search/README.html", 
+        "https://huggingface.co/Qwen/Qwen3-Embedding-0.6B",
+        "https://docs.haystack.deepset.ai/docs/inmemorybm25retriever", 
+        "https://qdrant.tech/documentation/search/hybrid-queries/", 
+        "https://qdrant.tech/documentation/faq/qdrant-fundamentals/", 
+        "https://www.sbert.net/examples/sentence_transformer/applications/retrieve_rerank/README.html",
+        "https://sbert.net/examples/sparse_encoder/applications/retrieve_rerank/README.html",
+        "https://www.sbert.net/docs/package_reference/sentence_transformer/evaluation.html#sentence_transformers.evaluation.InformationRetrievalEvaluator",
+        "https://www.sbert.net/examples/sparse_encoder/evaluation/README.html", 
+        "https://www.sbert.net/examples/sparse_encoder/training/retrievers/README.html", 
+        "https://arxiv.org/abs/2407.01219",
+        "https://arxiv.org/abs/2307.03172",
+        "https://arxiv.org/abs/2212.10496"
+]
+
+def embed(texts, batch_size=16):
+    embeddings = []
+
+    for debut in range(0, len(texts), batch_size):
+        lot = texts[debut:debut + batch_size]
+        print(
+            f"Embeddings : {debut + 1} à {debut + len(lot)} / {len(texts)}",
+            flush=True,
+        )
+
+        response = requests.post(
+            f"{OLLAMA}/api/embed",
+            json={"model": EMBED_MODEL, "input": lot},
+            timeout=(10, 300),
+        )
+        response.raise_for_status()
+        embeddings.extend(response.json()["embeddings"])
+
+    return np.array(embeddings)
+
+def get_chunks_tokens(urls, chunk_size=350, overlap=80):
+    if not 0 <= overlap < chunk_size:
+        raise ValueError("Il faut 0 <= overlap < chunk_size.")
+    chunks = []
+    for url in urls:
+        response = requests.get(url, timeout=30)
+        response.raise_for_status()
+
+        page = BeautifulSoup(response.content, "html.parser")
+
+        if url.startswith("https://arxiv.org/abs/"):
+            abstract = page.select_one("blockquote.abstract")
+            if abstract is None:
+                raise ValueError(f"Résumé arXiv introuvable : {url}")
+
+            text_page = abstract.get_text(" ", strip=True)
+        else:
+            article = page.select_one("article, main, [role='main']")
+            if article is None:
+                raise ValueError(f"Contenu principal introuvable : {url}")
+
+            # Retirer la navigation et garder les blocs de code/tableaux entiers.
+            for element in article.select("nav, aside, script, style"):
+                element.decompose()
+            paragraphs = []
+            for element in article.find_all(["h1", "h2", "h3", "p", "li", "pre", "table"]):
+                if element.find_parent(["li", "pre", "table"]) is not None:
+                    continue
+                separator = "\n" if element.name in ("pre", "table") else " "
+                paragraphs.append(element.get_text(separator, strip=True))
+            text_page = "\n\n".join(text for text in paragraphs if text)
+        tokens = tokenizer.encode(text_page, add_special_tokens=False)
+
+        for debut in range(0, len(tokens), chunk_size - overlap):
+            fin = debut + chunk_size  # which tokens we take   
+            chunks.append({
+                "text": tokenizer.decode(tokens[debut:fin]), 
+                "url": url
+            })
+            if fin >= len(tokens):
+                break
+        
+    return chunks
+
+if __name__ == "__main__":
+    chunks = get_chunks_tokens(urls)
+    embeddings = embed([chunk["text"] for chunk in chunks])
+    with db_connection() as connection:
+        save_chunks(connection, chunks, embeddings)
+    print(f"{len(chunks)} chunks enregistrés.")
+
