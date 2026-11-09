@@ -3,7 +3,7 @@ from datetime import datetime
 from pathlib import Path
 from time import perf_counter
 
-from rag import answer_question, embed, get_chunks_tokens, urls
+from scripts.rag import answer_question, embed, get_chunks_tokens, urls
 
 def main():
     dossier = Path(__file__).resolve().parent
