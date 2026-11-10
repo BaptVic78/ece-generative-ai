@@ -31,7 +31,7 @@ def ask_llm(prompt):
 
     return data["message"]["content"]
 
-def answer_question(connection, question, chunks, embeddings):
+def answer_question(connection, question):
     question_embedding = embed([question])[0]
     passages = retrieve(connection, question_embedding, k=5)
     context = "\n\n".join(
@@ -68,7 +68,7 @@ def run_llm_with_rag(connection):
             break
         if not question:
             continue
-        answer, passages = answer_question(question, connection)
+        answer, passages = answer_question(question=question, connection=connection)
         print(answer)
         for i, passage in enumerate(passages, start=1):
             print(f"[{i}] {passage['url']}")
