@@ -16,22 +16,16 @@ EMBED_MODEL = os.environ.get("EMBED_MODEL")
 
 tokenizer = AutoTokenizer.from_pretrained(os.environ["TOKENIZER_MODEL"])
 
-urls = ["https://docs.haystack.deepset.ai/docs/documentcleaner", 
-        "https://docs.haystack.deepset.ai/docs/documentsplitter", 
-        "https://docs.haystack.deepset.ai/docs/recursivesplitter", 
-        "https://www.sbert.net/examples/sentence_transformer/applications/semantic-search/README.html", 
-        "https://huggingface.co/Qwen/Qwen3-Embedding-0.6B",
-        "https://docs.haystack.deepset.ai/docs/inmemorybm25retriever", 
-        "https://qdrant.tech/documentation/search/hybrid-queries/", 
-        "https://qdrant.tech/documentation/faq/qdrant-fundamentals/", 
-        "https://www.sbert.net/examples/sentence_transformer/applications/retrieve_rerank/README.html",
-        "https://sbert.net/examples/sparse_encoder/applications/retrieve_rerank/README.html",
-        "https://www.sbert.net/docs/package_reference/sentence_transformer/evaluation.html#sentence_transformers.evaluation.InformationRetrievalEvaluator",
-        "https://www.sbert.net/examples/sparse_encoder/evaluation/README.html", 
-        "https://www.sbert.net/examples/sparse_encoder/training/retrievers/README.html", 
-        "https://arxiv.org/abs/2407.01219",
-        "https://arxiv.org/abs/2307.03172",
-        "https://arxiv.org/abs/2212.10496"
+urls_path = (
+    Path(__file__).resolve().parent.parent
+    / "config"
+    / "rag_urls.txt"
+)
+
+urls = [
+    line.strip()
+    for line in urls_path.read_text(encoding="utf-8").splitlines()
+    if line.strip()
 ]
 
 def embed(texts, batch_size=16):
