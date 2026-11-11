@@ -54,11 +54,11 @@ CREATE TABLE chunks (
     id BIGSERIAL PRIMARY KEY,
     text TEXT NOT NULL,
     source TEXT NOT NULL,
-    embedding VECTOR(1024) NOT NULL
+    embedding VECTOR(1024) NOT NULL,
+    corpus TEXT NOT NULL 
 );
 ```
 The vector dimension must match the embedding model output. This project uses 1024-dimensional embeddings.
-
 
 ## Run the project
 
@@ -67,15 +67,20 @@ Run the following commands from the repository root.
 ### Index the documents
 
 ```bash
-uv run scripts/index.py
+uv run scripts/index.py rag
+uv run scripts/index.py python
 ```
 
-This script extracts the RAG documentation, splits it into chunks, generates
-embeddings with Ollama, and stores the chunks, sources, and embeddings in
+These scripts extract the RAG documentation, split it into chunks, generate
+embeddings with Ollama, and store the chunks, sources, and embeddings in
 PostgreSQL. Existing entries for the indexed sources are replaced.
+Approximately 400 chunks for the RAG documentation, and 5337 for the python documentation.
 
 Run this step before the first use and whenever the documents, chunking
 configuration, or embedding model change.
+
+> [!WARNING]
+> Without GPU, the script takes a lot of time to run.
 
 ### Chat with the assistant
 
@@ -118,8 +123,6 @@ claims.
 
 Evaluation results are saved as JSONL files. Answer correctness and
 citation validity are assessed manually.
-
-
 
 
 
