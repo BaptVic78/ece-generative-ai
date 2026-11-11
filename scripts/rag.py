@@ -44,7 +44,7 @@ def ask_llm(prompt):
 
 def answer_question(connection, question):
     question_embedding = embed([question])[0]
-    passages = retrieve(connection, question_embedding, k=5)
+    passages = retrieve(connection, question_embedding, k=5, corpus='rag')
     context = "\n\n".join(
         f"[{i}] Source: {passage['url']}\n{passage['text']}"
         for i, passage in enumerate(passages, start=1)
