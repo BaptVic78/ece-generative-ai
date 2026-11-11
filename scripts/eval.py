@@ -64,7 +64,7 @@ def main():
                 )
 
                 debut = perf_counter()
-                answer, passages = answer_question(
+                answer, passages, tokens = answer_question(
                     question=question,
                     connection=connection,
                 )
@@ -81,6 +81,9 @@ def main():
                     "réponse_correcte": None,
                     "citation_correcte": None,
                     "commentaire": "",
+                    "tokens_entree": tokens["tokens_entree"],
+                    "tokens_sortie": tokens["tokens_sortie"],
+                    "tokens_total": tokens["tokens_total"]
                 }
                 resultat.update(calculate_recall(test, passages))
 

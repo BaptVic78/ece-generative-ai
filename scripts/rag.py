@@ -43,7 +43,11 @@ def ask_llm(prompt):
     ]:
         print(f"{label} : {data[field] / 1_000_000_000:.1f} s")
 
-    return data["message"]["content"]
+    return data["message"]["content"], {
+        "tokens_entree": data["prompt_eval_count"],
+        "tokens_sortie": data["eval_count"],
+        "tokens_total": data["prompt_eval_count"] + data["eval_count"],
+    }
 
 def rerank(question, passages, k=5):
     if k < 1:
@@ -98,7 +102,8 @@ Vérifie que l'exemple concerne la classe demandée.
 Une information seulement partielle doit être signalée comme telle.
 Termine chaque affirmation par l'URL exacte de sa source.
 """
-    return ask_llm(prompt), passages
+    answer, tokens = ask_llm(prompt)
+    return answer, passages, tokens
 
 def run_llm_with_rag(connection):
     while True:
@@ -107,7 +112,10 @@ def run_llm_with_rag(connection):
             break
         if not question:
             continue
-        answer, passages = answer_question(question=question, connection=connection)
+        answer, passages, _ = answer_question(
+            question=question, 
+            connection=connection,
+        )
         print(answer)
         for i, passage in enumerate(passages, start=1):
             print(f"[{i}] {passage['url']}")
