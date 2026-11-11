@@ -6,6 +6,37 @@ from time import perf_counter
 from rag import answer_question
 from db import db_connection
 
+def calculate_recall(test, passages):
+    if test["source"] is None:
+        return {
+            "rang_preuve": None,
+            "recall@1": None,
+            "recall@3": None,
+            "recall@5": None,
+        }
+
+    preuve = test.get("preuve_attendue")
+    if not preuve or not preuve.strip():
+        raise ValueError(f"Preuve attendue manquante pour {test['id']}")
+
+    # Ignore les différences de casse et d'espacement.
+    preuve = " ".join(preuve.split()).casefold()
+    rang_preuve = None
+
+    for rang, passage in enumerate(passages, start=1):
+        texte = " ".join(passage["text"].split()).casefold()
+
+        if passage["url"] == test["source"] and preuve in texte:
+            rang_preuve = rang
+            break
+
+    return {
+        "rang_preuve": rang_preuve,
+        "recall@1": int(rang_preuve is not None and rang_preuve <= 1),
+        "recall@3": int(rang_preuve is not None and rang_preuve <= 3),
+        "recall@5": int(rang_preuve is not None and rang_preuve <= 5),
+    }
+
 
 def main():
     dossier = Path(__file__).resolve().parent
