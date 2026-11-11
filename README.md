@@ -60,6 +60,66 @@ CREATE TABLE chunks (
 The vector dimension must match the embedding model output. This project uses 1024-dimensional embeddings.
 
 
+## Run the project
+
+Run the following commands from the repository root.
+
+### Index the documents
+
+```bash
+uv run scripts/index.py
+```
+
+This script extracts the RAG documentation, splits it into chunks, generates
+embeddings with Ollama, and stores the chunks, sources, and embeddings in
+PostgreSQL. Existing entries for the indexed sources are replaced.
+
+Run this step before the first use and whenever the documents, chunking
+configuration, or embedding model change.
+
+### Chat with the assistant
+
+```bash
+uv run scripts/rag.py
+```
+
+The assistant searches the indexed documents to answer your questions.
+Enter `quit` or `exit` to stop.
+
+### Evaluate the RAG
+
+```bash
+uv run scripts/eval.py
+```
+
+This script runs the questions from `tests_rag/test.jsonl` against the
+indexed documents. It saves a timestamped results file in `scripts/`:
+
+```text
+resultats-YYYYMMDD-HHMMSS-ffffff.jsonl
+```
+
+Each record contains the question, expected answer, generated answer,
+retrieved passages, and response time. Correctness and citation fields
+are left empty for manual assessment.
+
+
+## Current limitations
+
+The RAG assistant can retrieve relevant passages, but some answers still
+misinterpret them or add unsupported details.
+
+Citations are frequently present, but their presence does not guarantee
+that they support the answer.
+
+The assistant generally abstains when local experimental results are
+unavailable. However, some abstentions include unnecessary or inaccurate
+claims.
+
+Evaluation results are saved as JSONL files. Answer correctness and
+citation validity are assessed manually.
+
+
 
 
 
