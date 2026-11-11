@@ -17,7 +17,7 @@ def db_connection():
         port=os.environ["DB_PORT"],
     )
 
-def save_chunks(connection, chunks:list, embeddings):
+def save_chunks(connection, chunks:list, embeddings, replace_sources=False):
     if len(chunks) != len(embeddings):
         raise ValueError("Chaque chunk doit avoir un embedding.")
     register_vector(connection)
@@ -25,14 +25,19 @@ def save_chunks(connection, chunks:list, embeddings):
         INSERT INTO chunks (text, source, embedding)
         VALUES (%s, %s, %s);
     """
-    with connection.cursor() as cur:
-        for i, chunk in enumerate(chunks):
-            cur.execute(
-                query, 
-                (chunk["text"], chunk["url"], embeddings[i])
-            )
-    connection.commit()
-        
+    # Un échec annule le remplacement et les insertions de ce lot.
+    with connection.transaction():
+        with connection.cursor() as cur:
+            if replace_sources:
+                sources = sorted({chunk["url"] for chunk in chunks})
+                cur.execute("DELETE FROM chunks WHERE source = ANY(%s)", (sources,))
+            for i, chunk in enumerate(chunks):
+                cur.execute(
+                    query,
+                    (chunk["text"], chunk["url"], embeddings[i]),
+                )
+
+
 def retrieve(connection, question_embedding, k):
     register_vector(connection)
     with connection.cursor() as cur:
