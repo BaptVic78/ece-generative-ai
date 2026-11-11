@@ -2,6 +2,7 @@ from dotenv import load_dotenv
 import os
 import requests
 from pathlib import Path
+from sentence_transformers import CrossEncoder
 
 from index import embed
 from db import db_connection, retrieve
@@ -11,6 +12,8 @@ load_dotenv(dotenv_path=env_path)
 
 OLLAMA = os.environ.get("OLLAMA_URL")
 LLM = os.environ.get("LLM_MODEL")
+
+reranker = None
 
 def ask_llm(prompt):
     response = requests.post(f"{OLLAMA}/api/chat", json={
@@ -42,9 +45,43 @@ def ask_llm(prompt):
 
     return data["message"]["content"]
 
+def rerank(question, passages, k=5):
+    if k < 1:
+        raise ValueError("k doit être supérieur ou égal à 1.")
+
+    if not passages:
+        return []
+
+    global reranker
+    if reranker is None:
+        reranker = CrossEncoder(
+            "cross-encoder/mmarco-mMiniLMv2-L12-H384-v1",
+            device="cpu",
+        )
+
+    pairs = [
+        (question, passage["text"])
+        for passage in passages
+    ]
+
+    scores = reranker.predict(
+        pairs,
+        batch_size=8,
+        show_progress_bar=False,
+    )
+
+    ranked_indices = sorted(
+        range(len(passages)),
+        key=lambda i: float(scores[i]),
+        reverse=True,
+    )
+
+    return [passages[i] for i in ranked_indices[:k]]
+
 def answer_question(connection, question):
     question_embedding = embed([question])[0]
-    passages = retrieve(connection, question_embedding, k=5, corpus='rag')
+    candidats = retrieve(connection, question_embedding, k=10, corpus="rag")
+    passages = rerank(question, candidats, k=5)
     context = "\n\n".join(
         f"[{i}] Source: {passage['url']}\n{passage['text']}"
         for i, passage in enumerate(passages, start=1)

@@ -82,6 +82,7 @@ def main():
                     "citation_correcte": None,
                     "commentaire": "",
                 }
+                resultat.update(calculate_recall(test, passages))
 
                 fichier.write(
                     json.dumps(resultat, ensure_ascii=False) + "\n"
