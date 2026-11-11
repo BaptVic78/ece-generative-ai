@@ -60,6 +60,11 @@ CREATE TABLE chunks (
 ```
 The vector dimension must match the embedding model output. This project uses 1024-dimensional embeddings.
 
+### Python documentation 
+
+- Install [Python 3.12 Documentation](https://docs.python.org/3.12/archives/python-3.12-docs-html.zip).
+- Put the unziped folder `python-3.12-docs-html` into the root of your project.  
+
 ## Run the project
 
 Run the following commands from the repository root.
