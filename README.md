@@ -96,10 +96,11 @@ uv run scripts/rag.py
 The assistant searches the indexed documents to answer your questions.
 Enter `quit` or `exit` to stop.
 
-### Evaluate the RAG
+### Evaluate the RAG on the 2 corpus (RAG and python), and get recall@5
 
 ```bash
-uv run scripts/eval.py
+uv run scripts/eval.py rag
+uv run scripts/eval.py python
 ```
 
 This script runs the questions from `tests_rag/test.jsonl` against the
