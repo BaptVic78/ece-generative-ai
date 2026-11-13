@@ -82,9 +82,9 @@ def rerank(question, passages, k=5):
 
     return [passages[i] for i in ranked_indices[:k]]
 
-def answer_question(connection, question, corpus="rag"):
+def answer_question(connection, question):
     question_embedding = embed([question])[0]
-    candidats = retrieve(connection, question_embedding, k=10, corpus=corpus)
+    candidats = retrieve(connection, question_embedding, k=10)
     passages = rerank(question, candidats, k=5)
     context = "\n\n".join(
         f"[{i}] Source: {passage['url']}\n{passage['text']}"

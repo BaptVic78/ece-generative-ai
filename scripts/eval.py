@@ -40,8 +40,7 @@ def calculate_recall(test, passages):
 
 
 def parse_arguments():
-    parser = argparse.ArgumentParser(description="Évaluer le RAG sur un corpus.")
-    parser.add_argument("corpus", choices=["rag", "python"], nargs="?", default="rag")
+    parser = argparse.ArgumentParser(description="Évaluer le RAG documentaire.")
     parser.add_argument("--limit", type=int, help="Nombre de questions à exécuter pour un essai.")
     args = parser.parse_args()
     if args.limit is not None and args.limit < 1:
@@ -68,27 +67,25 @@ def load_tests(test_path, limit=None):
     return tests
 
 
-def check_corpus(connection, corpus):
+def check_index(connection):
     with connection.cursor() as cursor:
-        cursor.execute("SELECT COUNT(*) FROM chunks WHERE corpus = %s", (corpus,))
+        cursor.execute("SELECT COUNT(*) FROM chunks")
         nombre_chunks = cursor.fetchone()[0]
 
     if nombre_chunks == 0:
-        raise ValueError(f"Aucun chunk dans le corpus {corpus}. Lance index.py {corpus}.")
+        raise ValueError("Aucun chunk indexé. Lance uv run scripts/index.py.")
 
 
-def evaluate_question(connection, test, corpus):
+def evaluate_question(connection, test):
     debut = perf_counter()
     answer, passages, tokens = answer_question(
         question=test["question"],
         connection=connection,
-        corpus=corpus,
     )
     duree = perf_counter() - debut
 
     resultat = {
         "id": test["id"],
-        "corpus": corpus,
         "question": test["question"],
         "reponse_attendue": test["reponse_attendue"],
         "reponse_obtenue": answer,
@@ -106,7 +103,7 @@ def evaluate_question(connection, test, corpus):
     return resultat
 
 
-def evaluate_tests(connection, tests, corpus, sortie):
+def evaluate_tests(connection, tests, sortie):
     with sortie.open("x", encoding="utf-8") as fichier:
         print(f"Résultats enregistrés dans {sortie}", flush=True)
 
@@ -115,7 +112,7 @@ def evaluate_tests(connection, tests, corpus, sortie):
                 f"\n[{numero}/{len(tests)}] {test['id']} : {test['question']}",
                 flush=True,
             )
-            resultat = evaluate_question(connection, test, corpus)
+            resultat = evaluate_question(connection, test)
             fichier.write(json.dumps(resultat, ensure_ascii=False) + "\n")
             fichier.flush()
             print(resultat["reponse_obtenue"], flush=True)
@@ -124,17 +121,17 @@ def evaluate_tests(connection, tests, corpus, sortie):
 def main():
     args = parse_arguments()
     dossier = Path(__file__).resolve().parent
-    test_path = dossier.parent / "tests" / args.corpus / "test.jsonl"
+    test_path = dossier.parent / "tests" / "rag" / "test.jsonl"
     tests = load_tests(test_path, args.limit)
 
     date_run = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
-    dossier_resultats = dossier.parent / "tests" / args.corpus
+    dossier_resultats = dossier.parent / "tests" / "rag"
     dossier_resultats.mkdir(parents=True, exist_ok=True)
-    sortie = dossier_resultats / f"resultats-{args.corpus}-{date_run}.jsonl"
+    sortie = dossier_resultats / f"resultats-rag-{date_run}.jsonl"
 
     with db_connection() as connection:
-        check_corpus(connection, args.corpus)
-        evaluate_tests(connection, tests, args.corpus, sortie)
+        check_index(connection)
+        evaluate_tests(connection, tests, sortie)
 
 
 if __name__ == "__main__":
