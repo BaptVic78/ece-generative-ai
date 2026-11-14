@@ -1,4 +1,3 @@
-import argparse
 import json
 from datetime import datetime
 from pathlib import Path
@@ -37,16 +36,6 @@ def calculate_recall(test, passages):
         "recall@3": int(rang_preuve is not None and rang_preuve <= 3),
         "recall@5": int(rang_preuve is not None and rang_preuve <= 5),
     }
-
-
-def parse_arguments():
-    parser = argparse.ArgumentParser(description="Évaluer le RAG documentaire.")
-    parser.add_argument("--limit", type=int, help="Nombre de questions à exécuter pour un essai.")
-    args = parser.parse_args()
-    if args.limit is not None and args.limit < 1:
-        parser.error("--limit doit être supérieur ou égal à 1.")
-    return args
-
 
 def load_tests(test_path, limit=None):
     with test_path.open(encoding="utf-8") as fichier:
@@ -119,20 +108,18 @@ def evaluate_tests(connection, tests, sortie):
 
 
 def main():
-    args = parse_arguments()
     dossier = Path(__file__).resolve().parent
-    test_path = dossier.parent / "tests" / "rag" / "test.jsonl"
-    tests = load_tests(test_path, args.limit)
+    test_path = dossier.parent / "tests" / "doc_metier" / "test.jsonl"
+    tests = load_tests(test_path)
 
     date_run = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
-    dossier_resultats = dossier.parent / "tests" / "rag"
+    dossier_resultats = dossier.parent / "tests" / "doc_metier"
     dossier_resultats.mkdir(parents=True, exist_ok=True)
-    sortie = dossier_resultats / f"resultats-rag-{date_run}.jsonl"
+    sortie = dossier_resultats / f"resultats-{date_run}.jsonl"
 
     with db_connection() as connection:
         check_index(connection)
         evaluate_tests(connection, tests, sortie)
-
 
 if __name__ == "__main__":
     main()

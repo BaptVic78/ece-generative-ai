@@ -1,9 +1,9 @@
 from dotenv import load_dotenv
 import os
+import re
 import requests
 import numpy as np
 from pathlib import Path
-from bs4 import BeautifulSoup
 from transformers import AutoTokenizer
 
 from db import db_connection, save_chunks
@@ -16,17 +16,11 @@ EMBED_MODEL = os.environ.get("EMBED_MODEL")
 
 tokenizer = None
 
-urls_path = (
+documentation_path = (
     Path(__file__).resolve().parent.parent
-    / "config"
-    / "rag_urls.txt"
+    / "data_quality_demo"
+    / "01_doc_metier.md"
 )
-
-urls = [
-    line.strip()
-    for line in urls_path.read_text(encoding="utf-8").splitlines()
-    if line.strip()
-]
 
 def embed(texts, batch_size=16):
     embeddings = []
@@ -48,72 +42,76 @@ def embed(texts, batch_size=16):
 
     return np.array(embeddings)
 
-def get_chunks_tokens_rag(urls, chunk_size=350, overlap=80):
+def get_chunks_tokens_rag(document_path, chunk_size=350, overlap=80):
     if not 0 <= overlap < chunk_size:
         raise ValueError("Il faut 0 <= overlap < chunk_size.")
+
+    document_path = Path(document_path)
+    text = document_path.read_text(encoding="utf-8")
+    if not text.strip():
+        raise ValueError(f"Documentation vide : {document_path}")
+
     global tokenizer
     if tokenizer is None:
         tokenizer = AutoTokenizer.from_pretrained(os.environ["TOKENIZER_MODEL"])
 
-    chunks = []
-    for url in urls:
-        response = requests.get(url, timeout=30)
-        response.raise_for_status()
-
-        page = BeautifulSoup(response.content, "html.parser")
-
-        if url.startswith("https://arxiv.org/abs/"):
-            abstract = page.select_one("blockquote.abstract")
-            if abstract is None:
-                raise ValueError(f"Résumé arXiv introuvable : {url}")
-
-            text_page = abstract.get_text(" ", strip=True)
+    # Une section ne traverse pas le titre de la suivante.
+    sections = []
+    title = "Introduction"
+    lines = []
+    fence = None
+    for line in text.splitlines():
+        stripped = line.lstrip()
+        if stripped.startswith(("```", "~~~")):
+            marker = stripped[:3]
+            fence = None if fence == marker else (fence or marker)
+        if fence is None and re.match(r"^#{1,6} ", line):
+            if "\n".join(lines).strip():
+                sections.append((title, "\n".join(lines).strip()))
+            title = line.lstrip("#").strip()
+            lines = []
         else:
-            article = page.select_one("article, main, [role='main']")
-            if article is None:
-                raise ValueError(f"Contenu principal introuvable : {url}")
+            lines.append(line)
+    if "\n".join(lines).strip():
+        sections.append((title, "\n".join(lines).strip()))
 
-            # Retirer la navigation et garder les blocs de code/tableaux entiers.
-            for element in article.select("nav, aside, script, style"):
-                element.decompose()
-            paragraphs = []
-            # Les signatures et descriptions d'API Sphinx utilisent dt et dd.
-            for element in article.find_all(
-                ["h1", "h2", "h3", "h4", "p", "li", "pre", "table", "dt", "dd"]
-            ):
-                if element.find_parent(["li", "pre", "table", "dt", "dd"]) is not None:
-                    continue
-                if element.name == "pre":
-                    # Préserver les espaces du code, sans séparer chaque span HTML.
-                    text = element.get_text()
-                elif element.name == "table":
-                    rows = []
-                    for row in element.find_all("tr"):
-                        cells = row.find_all(["th", "td"], recursive=False)
-                        rows.append(" | ".join(cell.get_text(" ", strip=True) for cell in cells))
-                    text = "\n".join(rows)
-                else:
-                    text = element.get_text(" ", strip=True)
-                paragraphs.append(text)
-            text_page = "\n\n".join(text for text in paragraphs if text)
-        tokens = tokenizer.encode(text_page, add_special_tokens=False)
+    chunks = []
+    for number, (title, body) in enumerate(sections, start=1):
+        # Répéter le titre dans chaque fragment pour conserver le code métier.
+        prefix_tokens = tokenizer.encode(title + "\n\n", add_special_tokens=False)
+        body_size = chunk_size - len(prefix_tokens)
+        if body_size <= overlap:
+            raise ValueError(f"Titre trop long pour ce découpage : {title}")
 
-        for debut in range(0, len(tokens), chunk_size - overlap):
-            fin = debut + chunk_size  # which tokens we take   
+        code = re.search(r"\b(?:DQ-[A-Z]+[0-9]+|[A-Z]{2,4}-[0-9]+)\b", title)
+        section_id = code.group(0) if code else f"section-{number}"
+        source = f"data_quality_demo/{document_path.name}#{section_id}"
+        tokens = tokenizer.encode(body, add_special_tokens=False)
+
+        for start in range(0, len(tokens), body_size - overlap):
+            end = start + body_size
             chunks.append({
-                "text": tokenizer.decode(tokens[debut:fin]), 
-                "url": url
+                "text": tokenizer.decode(prefix_tokens + tokens[start:end]),
+                "url": source,
             })
-            if fin >= len(tokens):
+            if end >= len(tokens):
                 break
-        
+
+    if not chunks:
+        raise ValueError(f"Aucun contenu à indexer : {document_path}")
     return chunks
 
+
 if __name__ == "__main__":
-    chunks = get_chunks_tokens_rag(urls)
+    chunks = get_chunks_tokens_rag(documentation_path)
     embeddings = embed([chunk["text"] for chunk in chunks])
 
     with db_connection() as connection:
-        save_chunks(connection, chunks, embeddings, replace_sources=True)
+        # La table vectorielle contient maintenant cette seule documentation.
+        # En cas d'échec d'insertion, les anciens chunks sont conservés.
+        with connection.transaction():
+            with connection.cursor() as cursor:
+                cursor.execute("DELETE FROM chunks")
+            save_chunks(connection, chunks, embeddings)
 
-    print(f"{len(chunks)} chunks RAG enregistrés.")
+    print(f"{len(chunks)} chunks de {documentation_path.name} enregistrés.")
