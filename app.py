@@ -1,61 +1,115 @@
-import streamlit as st
-import random
-import time
-import os
+import sys
+from pathlib import Path
+from time import perf_counter
+
+import psycopg
 import requests
-from dotenv import load_dotenv
+import streamlit as st
 
-load_dotenv()
-OLLAMA = os.environ.get("OLLAMA_URL")
-LLM = os.environ.get("LLM_MODEL")
+# Réutiliser les modules existants du projet.
+sys.path.insert(0, str(Path(__file__).resolve().parent / "scripts"))
+from db import db_connection
+from index import index_markdown
+from rag import answer_question
 
-def get_qwen_response(messages):
-    response = requests.post(
-        f"{OLLAMA}/api/chat",
-        json={
-            "model": LLM, 
-            "messages": messages,
-            "stream": False
-        },
-        timeout=180
-    )
-    response.raise_for_status()
-    return response
+
+def display_message(message):
+    with st.chat_message(message["role"]):
+        for filename in message.get("files", []):
+            st.caption(f"📄 {filename}")
+        if message["content"]:
+            st.markdown(message["content"])
 
 
 st.title("Data quality assistant")
 
-# Initialize chat history
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-# Display chat messages from history on app rerun
 for message in st.session_state.messages:
-    with st.chat_message(message["role"]):
-        st.markdown(message["content"])
+    display_message(message)
 
-if prompt := st.chat_input("What is up?"):
-    # Display user message in chat message container
-    with st.chat_message("user"):
-        st.markdown(prompt)
-    # Add user message to chat history
-    st.session_state.messages.append({"role": "user", "content": prompt})
+submission = st.chat_input(
+    "Pose une question ou joins une documentation .md",
+    accept_file="multiple",
+    file_type=["md"],
+    submit_mode="disable",
+)
 
-    with st.chat_message("assistant"):
-        with st.spinner("Waiting for assistant..."):
-            response = get_qwen_response(st.session_state.messages)
-        data = response.json()
-        reply = data["message"]["content"]
+if submission is not None:
+    prompt = submission.text.strip()
+    files = submission.files
 
-        def secondes(champ):
-            return data.get(champ, 0) / 1_000_000_000
+    if prompt or files:
+        # Les noms de pièces jointes sont destinés à l'interface, pas à l'API.
+        history = [
+            {"role": message["role"], "content": message["content"]}
+            for message in st.session_state.messages
+            if message["content"]
+        ]
+        user_message = {
+            "role": "user",
+            "content": prompt,
+            "files": [file.name for file in files],
+        }
+        st.session_state.messages.append(user_message)
+        display_message(user_message)
 
-        st.caption(
-            f"Chargement du modèle : {secondes('load_duration'):.1f} s · "
-            f"Lecture du prompt : {secondes('prompt_eval_duration'):.1f} s · "
-            f"Génération : {secondes('eval_duration'):.1f} s "
-            f"({data.get('eval_count', 0)} tokens)"
-        )
-        st.markdown(reply)
-        st.session_state.messages.append({"role": "assistant", "content": reply})
+        with st.chat_message("assistant"):
+            upload_results = []
+            try:
+                if files:
+                    with st.spinner("Lecture des documents…"):
+                        with db_connection() as connection:
+                            # Tous les fichiers de cet envoi sont validés ensemble.
+                            with connection.transaction():
+                                for file in files:
+                                    result = index_markdown(
+                                        connection, file.name, file.getvalue()
+                                    )
+                                    upload_results.append(result)
 
+                    for result in upload_results:
+                        if result["already_indexed"]:
+                            st.caption(f"Déjà disponible : {result['filename']}")
+                        else:
+                            st.caption(f"Document ajouté : {result['filename']}")
+
+                if prompt:
+                    start = perf_counter()
+                    with st.spinner("Recherche et génération de la réponse…"):
+                        with db_connection() as connection:
+                            reply, passages, tokens = answer_question(
+                                connection,
+                                question=prompt,
+                                history=history,
+                            )
+                    st.markdown(reply)
+                    st.caption(
+                        f"Durée : {perf_counter() - start:.1f} s · "
+                        f"{tokens['tokens_entree']} tokens en entrée · "
+                        f"{tokens['tokens_sortie']} tokens générés"
+                    )
+                    with st.expander("Passages consultés"):
+                        for number, passage in enumerate(passages, start=1):
+                            st.write(f"[{number}] {passage['url']}")
+                            st.text(passage["text"])
+                else:
+                    # Un dépôt seul n'a pas besoin d'un appel au modèle de chat.
+                    reply = "\n\n".join(
+                        f"{result['filename']} est déjà indexé."
+                        if result["already_indexed"]
+                        else f"{result['filename']} a été ajouté à la documentation."
+                        for result in upload_results
+                    )
+                    st.markdown(reply)
+            except (ValueError, OSError, psycopg.Error, requests.RequestException):
+                reply = (
+                    "L’opération a échoué. Vérifie le fichier Markdown UTF-8, "
+                    "la connexion PostgreSQL et la disponibilité d’Ollama."
+                )
+                st.error(reply)
+
+            st.session_state.messages.append(
+                {"role": "assistant", "content": reply}
+            )

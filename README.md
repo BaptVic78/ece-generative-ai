@@ -50,18 +50,19 @@ Open the Query Tool on the existing `postgres` database and execute this command
 CREATE DATABASE genai_project;
 ```
 
-Open a new Query Tool connected to `genai_project`, then run:
+Open a new Query Tool connected to `genai_project`, then open and execute
+`postgresql/dbvector_schema.sql`. This file creates the pgvector extension,
+the `documents` table, the `chunks` table and their foreign key.
 
-```sql
-CREATE EXTENSION IF NOT EXISTS vector;
+Alternatively, from the repository root, use psql (adapt the port if needed):
 
-CREATE TABLE chunks (
-    id BIGSERIAL PRIMARY KEY,
-    text TEXT NOT NULL,
-    source TEXT NOT NULL,
-    embedding VECTOR(1024) NOT NULL
-);
+```bash
+psql -h 127.0.0.1 -p 5433 -U postgres -d genai_project -1 -f postgresql/dbvector_schema.sql
 ```
+
+The same script also adds `document_id` to an existing `chunks` table.
+It preserves existing rows; it does not populate their document references.
+
 The vector dimension must match the embedding model output. This project uses 1024-dimensional embeddings.
 
 ## Run the project
@@ -74,15 +75,34 @@ Run the following commands from the repository root.
 uv run scripts/index.py
 ```
 
-This script extracts the RAG documentation, split it into chunks, generate
-embeddings with Ollama, and store the chunks, sources, and embeddings in
-PostgreSQL. Existing entries for the indexed sources are replaced.
+This script indexes the local Markdown file
+`data_quality_demo/01_doc_metier.md`. Each document is identified by its
+SHA-256 content hash and indexing settings (embedding model, tokenizer,
+chunk size and overlap). An already indexed document is reused without
+recomputing its embeddings, even if uploaded under a different filename.
 
-Run this step before the first use and whenever the documents, chunking
-configuration, or embedding model change.
+New documents are added without deleting existing chunks. A changed document
+is stored as a new version alongside previous documents. The application
+currently searches all indexed documents together.
+
+The first indexing operation automatically creates the `documents` table
+and adds a nullable `document_id` foreign key to `chunks`. Existing chunks
+are preserved. Documents indexed before this migration have no recorded
+fingerprint and will be registered on their next import.
 
 > [!WARNING]
 > Without GPU, the script takes a lot of time to run.
+
+### Upload Markdown documents in Streamlit
+
+```bash
+uv run streamlit run app.py
+```
+
+Attach one or more UTF-8 Markdown files directly in the chat input and send
+them, with or without a question. Files are indexed automatically before
+the question is answered. A previously indexed document is reused.
+The chat searches the vector database and displays the passages used.
 
 ### Chat with the assistant
 

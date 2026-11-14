@@ -15,7 +15,7 @@ LLM = os.environ.get("LLM_MODEL")
 
 reranker = None
 
-def ask_llm(prompt):
+def ask_llm(prompt, history=None):
     response = requests.post(f"{OLLAMA}/api/chat", json={
         "model": LLM, 
         "messages": [
@@ -28,6 +28,7 @@ def ask_llm(prompt):
                 "généralisations. Si la réponse est absente, dis seulement "
                 "que tu ne sais pas."
             )},
+            *(history or []),
             {"role": "user", "content": prompt},
         ],
         "think": False,
@@ -82,7 +83,7 @@ def rerank(question, passages, k=5):
 
     return [passages[i] for i in ranked_indices[:k]]
 
-def answer_question(connection, question):
+def answer_question(connection, question, history=None):
     question_embedding = embed([question])[0]
     candidats = retrieve(connection, question_embedding, k=10)
     passages = rerank(question, candidats, k=5)
@@ -102,7 +103,7 @@ Vérifie que l'exemple concerne la classe demandée.
 Une information seulement partielle doit être signalée comme telle.
 Termine chaque affirmation par la référence exacte indiquée après Source.
 """
-    answer, tokens = ask_llm(prompt)
+    answer, tokens = ask_llm(prompt, history=history)
     return answer, passages, tokens
 
 def run_llm_with_rag(connection):

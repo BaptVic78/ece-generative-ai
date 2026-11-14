@@ -16,13 +16,38 @@ def db_connection():
         port=os.environ["DB_PORT"],
     )
 
-def save_chunks(connection, chunks:list, embeddings, replace_sources=False):
+def ensure_document_schema(connection):
+    """Ajouter le suivi des documents sans supprimer les chunks existants."""
+    schema_path = Path(__file__).resolve().parent.parent / "postgresql" / "dbvector_schema.sql"
+    with connection.transaction():
+        with connection.cursor() as cursor:
+            # Sérialiser la migration lors de premiers dépôts simultanés.
+            cursor.execute("SELECT pg_advisory_xact_lock(2026111401)")
+            cursor.execute(
+                """
+                SELECT to_regclass('documents') IS NOT NULL,
+                       EXISTS (
+                           SELECT 1 FROM pg_attribute
+                           WHERE attrelid = to_regclass('chunks')
+                             AND attname = 'document_id'
+                             AND NOT attisdropped
+                       )
+                """
+            )
+            has_documents, has_document_id = cursor.fetchone()
+            if not (has_documents and has_document_id):
+                cursor.execute(schema_path.read_text(encoding="utf-8"))
+
+
+def save_chunks(connection, chunks:list, embeddings, replace_sources=False, document_id=None):
     if len(chunks) != len(embeddings):
         raise ValueError("Chaque chunk doit avoir un embedding.")
+    if document_id is None:
+        ensure_document_schema(connection)
     register_vector(connection)
     query = """
-        INSERT INTO chunks (text, source, embedding)
-        VALUES (%s, %s, %s);
+        INSERT INTO chunks (text, source, embedding, document_id)
+        VALUES (%s, %s, %s, %s);
     """
     # Un échec annule le remplacement et les insertions de ce lot.
     with connection.transaction():
@@ -33,7 +58,7 @@ def save_chunks(connection, chunks:list, embeddings, replace_sources=False):
             for i, chunk in enumerate(chunks):
                 cur.execute(
                     query,
-                    (chunk["text"], chunk["url"], embeddings[i]),
+                    (chunk["text"], chunk["url"], embeddings[i], document_id),
                 )
 
 
